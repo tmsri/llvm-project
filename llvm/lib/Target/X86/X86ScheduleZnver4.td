@@ -28,17 +28,11 @@ def Znver4Model : SchedMachineModel {
   // AMD SOG 19h, 2.9.1 Op Cache
   // The op cache is organized as an associative cache with 64 sets and 8 ways.
   // At each set-way intersection is an entry containing up to 8 macro ops.
-  // The maximum capacity of the op cache is 4K ops.
-  // Agner, 22.5 µop cache
-  // The size of the µop cache is big enough for holding most critical loops.
-  // FIXME: PR50584: MachineScheduler/PostRAScheduler have quadradic complexity,
-  //        with large values here the compilation of certain loops
-  //        ends up taking way too long.
-  // Ideally for znver4, we should have 6.75K. However we don't add that
-  // considerting the impact compile time and prefer using default values 
-  // instead.
-  // Retaining minimal value to influence unrolling as we did for znver3.
-  let LoopMicroOpBufferSize = 512;
+  // The maximum capacity of the op cache is 6.75K ops.
+  // Assuming a maximum dispatch of 9 ops/cy and a mispredict cost of 12cy from
+  // the op-cache, we limit the loop buffer to 9*12 = 108 to avoid loop
+  // unrolling leading to excessive filling of the op-cache from frontend.
+  let LoopMicroOpBufferSize = 108;
   // AMD SOG 19h, 2.6.2 L1 Data Cache
   // The L1 data cache has a 4- or 5- cycle integer load-to-use latency.
   // AMD SOG 19h, 2.12 L1 Data Cache
@@ -1007,21 +1001,21 @@ def Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr : SchedWriteRes<[Zn4FPFMisc0]> {
   let ReleaseAtCycles = [1];
   let NumMicroOps = 1;
 }
-def : InstRW<[Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr], (instrs VEXTRACTF128rr, VEXTRACTI128rr)>;
+def : InstRW<[Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr], (instrs VEXTRACTF128rri, VEXTRACTI128rri)>;
 
 def Zn4WriteVEXTRACTI128mr : SchedWriteRes<[Zn4FPFMisc0, Zn4FPSt, Zn4Store]> {
   let Latency = !add(Znver4Model.LoadLatency, Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr.Latency);
   let ReleaseAtCycles = [1, 1, 1];
   let NumMicroOps = !add(Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr.NumMicroOps, 1);
 }
-def : InstRW<[Zn4WriteVEXTRACTI128mr], (instrs VEXTRACTI128mr, VEXTRACTF128mr)>;
+def : InstRW<[Zn4WriteVEXTRACTI128mr], (instrs VEXTRACTI128mri, VEXTRACTF128mri)>;
 
 def Zn4WriteVINSERTF128rmr : SchedWriteRes<[Zn4AGU012, Zn4Load, Zn4FPFMisc0]> {
   let Latency = !add(Znver4Model.LoadLatency, Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr.Latency);
   let ReleaseAtCycles = [1, 1, 1];
   let NumMicroOps = !add(Zn4WriteVEXTRACTF128rr_VEXTRACTI128rr.NumMicroOps, 0);
 }
-def : InstRW<[Zn4WriteVINSERTF128rmr], (instrs VINSERTF128rm)>;
+def : InstRW<[Zn4WriteVINSERTF128rmr], (instrs VINSERTF128rmi)>;
 
 defm : Zn4WriteResYMM<WriteVecStoreY, [Zn4FPSt, Zn4Store], Znver4Model.StoreLatency, [1, 1], 1>;
 defm : Zn4WriteResXMM<WriteVecStoreNT, [Zn4FPSt, Zn4Store], Znver4Model.StoreLatency, [1, 1], 1>;
@@ -1381,14 +1375,14 @@ def Zn4WriteVPERM2I128rr_VPERM2F128rr : SchedWriteRes<[Zn4FPVShuf]> {
   let ReleaseAtCycles = [1];
   let NumMicroOps = 1;
 }
-def : InstRW<[Zn4WriteVPERM2I128rr_VPERM2F128rr], (instrs VPERM2I128rr, VPERM2F128rr)>;
+def : InstRW<[Zn4WriteVPERM2I128rr_VPERM2F128rr], (instrs VPERM2I128rri, VPERM2F128rri)>;
 
 def Zn4WriteVPERM2F128rm : SchedWriteRes<[Zn4AGU012, Zn4Load, Zn4FPVShuf]> {
   let Latency = !add(Znver4Model.LoadLatency, Zn4WriteVPERM2I128rr_VPERM2F128rr.Latency);
   let ReleaseAtCycles = [1, 1, 1];
   let NumMicroOps = !add(Zn4WriteVPERM2I128rr_VPERM2F128rr.NumMicroOps, 0);
 }
-def : InstRW<[Zn4WriteVPERM2F128rm], (instrs VPERM2F128rm)>;
+def : InstRW<[Zn4WriteVPERM2F128rm], (instrs VPERM2F128rmi)>;
 
 def Zn4WriteVPERMPSYrr : SchedWriteRes<[Zn4FPVShuf]> {
   let Latency = 7;
@@ -1637,17 +1631,25 @@ def : InstRW<[Zn4WriteFCmp64], (instregex
 	)>;
 
 // MOV Instructions
-def Zn4MOVS: SchedWriteRes<[Zn4FPFMisc12]> {
+def Zn4MOVDUPZ: SchedWriteRes<[Zn4FPFMisc12]> {
   let Latency = 2;
   let ReleaseAtCycles = [2];
+  let NumMicroOps = 1;
+}
+def : InstRW<[Zn4MOVDUPZ], (instregex
+        "(V?)VMOVDDUP(Z|Z128|Z256)(rr|rrk|rrkz)"
+	)>;
+
+def Zn4MOVS: SchedWriteRes<[Zn4FPFMisc12]> {
+  let Latency = 2;
+  let ReleaseAtCycles = [1];
   let NumMicroOps = 1;
 }
 def : InstRW<[Zn4MOVS], (instregex
         "(V?)PMOV(SX|ZX)(BD|BQ|BW|WD|WQ|DQ)(Z128?|Z256?)(rr|rrk|rrkz)",
         "(V?)PMOV(SX|QD|UZ|ZX)(BD|BQ|BW?)(Y|Z128?)(rr|rrk|rrkz)",
         "(V?)PMOV(SX|US|ZX)(DQ|WD|QW|WQ?)(Y|Z128?)(rr|rrk|rrkz)",
-        "(V?)VMOVDDUP(Z|Z128|Z256)(rr|rrk|rrkz)",
-        "VPMOV(DB|DW|QB|QD|QW|SDB|SDW|SQB|SQD|SQW|SWB|USDB|USDW|USQB|USQD|USWB|WB)(Z128?)(rr|rrk|rrkz)"
+        "VPMOV(DB|DW|QB|QD|QW|SDB|SDW|SQB|SQD|SQW|SWB|USDB|USDW|USQB|USQD|USWB|WB)(Z128?|Z256?)(rr|rrk|rrkz)"
 	)>;
 
 def Zn4MOVSZ: SchedWriteRes<[Zn4FPFMisc12]> {
@@ -1853,6 +1855,14 @@ def Zn4WriteVZeroIdiomLogicX : SchedWriteVariant<[
 // NOTE: PXORrr,PANDNrr are not zero-cycle!
 def : InstRW<[Zn4WriteVZeroIdiomLogicX], (instrs VPXORrr, VPANDNrr)>;
 
+// TODO: This should be extended to incorporate all of the AVX512 zeroing
+// idioms that can be executed by the renamer.
+def Zn4WriteVZeroIdiomLogicZ : SchedWriteVariant<[
+    SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn4WriteZeroLatency]>,
+    SchedVar<NoSchedPred,                          [WriteVecLogicZ]>
+]>;
+def : InstRW<[Zn4WriteVZeroIdiomLogicZ], (instrs VPXORDZrr)>;
+
 def Zn4WriteVZeroIdiomLogicY : SchedWriteVariant<[
     SchedVar<MCSchedPredicate<ZeroIdiomPredicate>, [Zn4WriteZeroLatency]>,
     SchedVar<NoSchedPred,                          [WriteVecLogicY]>
@@ -1927,6 +1937,12 @@ def : IsZeroIdiomFunction<[
     VPSUBSBYrr, VPSUBSWYrr,
     VPSUBUSBYrr, VPSUBUSWYrr,
     VPCMPGTBYrr, VPCMPGTWYrr, VPCMPGTDYrr, VPCMPGTQYrr
+  ], ZeroIdiomPredicate>,
+
+  // AVX ZMM Zero-idioms.
+  // TODO: This should be expanded to incorporate all AVX512 zeroing idioms.
+  DepBreakingClass<[
+    VPXORDZrr
   ], ZeroIdiomPredicate>,
 ]>;
 

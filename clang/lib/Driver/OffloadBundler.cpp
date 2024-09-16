@@ -79,7 +79,8 @@ OffloadTargetInfo::OffloadTargetInfo(const StringRef Target,
   auto TargetFeatures = Target.split(':');
   auto TripleOrGPU = TargetFeatures.first.rsplit('-');
 
-  if (clang::StringToCudaArch(TripleOrGPU.second) != clang::CudaArch::UNKNOWN) {
+  if (clang::StringToOffloadArch(TripleOrGPU.second) !=
+      clang::OffloadArch::UNKNOWN) {
     auto KindTriple = TripleOrGPU.first.split('-');
     this->OffloadKind = KindTriple.first;
 
@@ -113,8 +114,11 @@ bool OffloadTargetInfo::isOffloadKindValid() const {
 
 bool OffloadTargetInfo::isOffloadKindCompatible(
     const StringRef TargetOffloadKind) const {
-  if (OffloadKind == TargetOffloadKind)
+  if ((OffloadKind == TargetOffloadKind) ||
+      (OffloadKind == "hip" && TargetOffloadKind == "hipv4") ||
+      (OffloadKind == "hipv4" && TargetOffloadKind == "hip"))
     return true;
+
   if (BundlerConfig.HipOpenmpCompatible) {
     bool HIPCompatibleWithOpenMP = OffloadKind.starts_with_insensitive("hip") &&
                                    TargetOffloadKind == "openmp";
@@ -1756,16 +1760,8 @@ Error OffloadBundler::UnbundleArchive() {
 
           // For inserting <CompatibleTarget, list<CodeObject>> entry in
           // OutputArchivesMap.
-          if (!OutputArchivesMap.contains(CompatibleTarget)) {
-
-            std::vector<NewArchiveMember> ArchiveMembers;
-            ArchiveMembers.push_back(NewArchiveMember(MemBufRef));
-            OutputArchivesMap.insert_or_assign(CompatibleTarget,
-                                               std::move(ArchiveMembers));
-          } else {
-            OutputArchivesMap[CompatibleTarget].push_back(
-                NewArchiveMember(MemBufRef));
-          }
+          OutputArchivesMap[CompatibleTarget].push_back(
+              NewArchiveMember(MemBufRef));
         }
       }
 
