@@ -6,20 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-// The demangler does not pass all these tests with the system dylibs on macOS.
-// XFAIL: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
-
 // This test is too big for most embedded devices.
 // XFAIL: LIBCXX-PICOLIBC-FIXME
 
 // https://llvm.org/PR51407 was not fixed in some previously-released
 // demanglers, which causes them to run into the infinite loop.
-// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
-// UNSUPPORTED: stdlib=apple-libc++ && target={{.+}}-apple-macosx11.0
+// UNSUPPORTED: using-built-library-before-llvm-14
 
 // Android's long double on x86[-64] is (64/128)-bits instead of Linux's usual
 // 80-bit format, and this demangling test is failing on it.
 // XFAIL: LIBCXX-ANDROID-FIXME && target={{i686|x86_64}}-{{.+}}-android{{.*}}
+
+// XFAIL: win32-broken-printf-a-precision
 
 #include "support/timer.h"
 #include <algorithm>
@@ -30139,6 +30137,7 @@ const char* cases[][2] =
     {"_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E0_clIiiEEDaS3_Qaa1CIDtfp_EELb1E", "auto void test7::f<int>()::'lambda0'<typename $T> requires C<T> && C<TL0_> (auto)::operator()<int, int>(auto) const requires C<decltype(fp)> && true"},
     {"_ZZN5test71fIiEEvvENKUlTyQaa1CIT_E1CITL0__ET0_E1_clIiiEEDaS3_Q1CIDtfp_EE", "auto void test7::f<int>()::'lambda1'<typename $T> requires C<T> && C<TL0_> (auto)::operator()<int, int>(auto) const requires C<decltype(fp)>"},
     {"_ZZN5test71fIiEEvvENKUlTyT0_E_clIiiEEDaS1_", "auto void test7::f<int>()::'lambda'<typename $T>(auto)::operator()<int, int>(auto) const"},
+    {"_ZN3FooIiE6methodITk4TrueIT_EiEEvS3_", "void Foo<int>::method<int>(T)"},
 
     // C++20 requires expressions, see https://github.com/itanium-cxx-abi/cxx-abi/issues/24.
     {"_Z1fIiEviQrqXcvT__EXfp_Xeqfp_cvS0__EXplcvS0__ELi1ER5SmallXmicvS0__ELi1ENXmlcvS0__ELi2ENR11SmallerThanILi1234EETS0_T1XIS0_ETNS3_4typeETS2_IiEQ11SmallerThanIS0_Li256EEE", "void f<int>(int) requires requires { (T)(); fp; fp == (T)(); {(T)() + 1} -> Small; {(T)() - 1} noexcept; {(T)() * 2} noexcept -> SmallerThan<1234>; typename T; typename X<T>; typename X<T>::type; typename X<int>; requires SmallerThan<T, 256>; }"},
